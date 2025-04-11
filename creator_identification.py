@@ -1,40 +1,48 @@
-# Required libraries
 import streamlit as st
 import pandas as pd
+import numpy as np
 from sentence_transformers import SentenceTransformer, util
 
-# -------------------------------
-# CreatorMatcher class definition
-# -------------------------------
+# ---------------------------------------
+# CreatorMatcher Class with Robust Logic
+# ---------------------------------------
 
 class CreatorMatcher:
-    """
-    Handling matching a campaign brief to a set of creators
-    based on semantic similarity between the brief and creator bios.
-    """
     def __init__(self, creators_df, embedding_model_name="all-MiniLM-L6-v2"):
+        """
+        Initialize matcher with dataframe and embed all bios.
+        """
         self.creators_df = creators_df.copy()
-        # Load pre-trained model from Sentence Transformers
         self.model = SentenceTransformer(embedding_model_name)
         self._embed_creator_bios()
 
     def _embed_creator_bios(self):
-        # Convert all bios into sentence embeddings and store in a new column
+        """
+        Create sentence embeddings from all creator bios.
+        """
         self.creators_df["bio_embedding"] = self.model.encode(
-            self.creators_df["bio"].tolist(), convert_to_tensor=True
+            self.creators_df["bio"].tolist(),
+            convert_to_tensor=False  # Avoid tensor issues for cached runs
         )
 
     def match(self, campaign_brief, top_n=10, filters=None):
-        # Convert the campaign brief to an embedding
+        """
+        Match the campaign brief to creator bios using cosine similarity.
+        """
+        # Encode campaign brief
         campaign_embedding = self.model.encode(campaign_brief, convert_to_tensor=True)
 
-        # Compute similarity between the brief and each bio
-        similarities = util.cos_sim(campaign_embedding, list(self.creators_df["bio_embedding"]))[0].cpu().numpy()
+        # Ensure all bio embeddings are tensors for cos_sim
+        embeddings = list(self.creators_df["bio_embedding"])
+        if isinstance(embeddings[0], (list, np.ndarray)):
+            import torch
+            embeddings = [torch.tensor(e) for e in embeddings]
 
-        # Store similarity scores in a new column
+        # Compute cosine similarities
+        similarities = util.cos_sim(campaign_embedding, embeddings)[0].cpu().numpy()
         self.creators_df["similarity_score"] = similarities
 
-        # Apply optional filters (niche/location)
+        # Apply filters (niche, location)
         df_filtered = self.creators_df
         if filters:
             if filters.get("niche"):
@@ -42,65 +50,61 @@ class CreatorMatcher:
             if filters.get("location"):
                 df_filtered = df_filtered[df_filtered["location"] == filters["location"]]
 
-        # Sort by similarity and return top results
+        # Return top matches
         return df_filtered.sort_values(by="similarity_score", ascending=False).head(top_n).drop(columns=["bio_embedding"])
 
+# ----------------------------------------
+# Streamlit App Starts Here
+# ----------------------------------------
 
-### Streamlit App UI Logic
-
-
-# Configure page
 st.set_page_config(page_title="Creator Matching App", layout="wide")
 st.title("🔍 Creator Matching App")
-st.markdown("Match your campaign brief with the most relevant creators based on their bios using semantic similarity.")
+st.markdown("Match your campaign brief with the most relevant creators using semantic similarity.")
 
-# Upload file (CSV or Excel)
-uploaded_file = st.sidebar.file_uploader("📁 Upload your dataset (CSV or Excel)", type=["csv", "xlsx"])
+# File upload
+uploaded_file = st.sidebar.file_uploader("📁 Upload your creator dataset (CSV or Excel)", type=["csv", "xlsx"])
 
-# Proceed only if file is uploaded
+# Only proceed if file is uploaded
 if uploaded_file:
     try:
-        # Read file dynamically based on extension
+        # Read file dynamically
         if uploaded_file.name.endswith(".csv"):
             creators_df = pd.read_csv(uploaded_file)
         elif uploaded_file.name.endswith(".xlsx"):
             creators_df = pd.read_excel(uploaded_file)
         else:
-            st.error("Unsupported file type. Please upload a CSV or Excel file.")
+            st.error("Unsupported file format.")
             st.stop()
 
-        # Ensure required columns exist
+        # Ensure required columns are present
         required_cols = {"name", "bio", "niche", "location", "audience_size"}
         if not required_cols.issubset(set(creators_df.columns)):
-            st.error("Uploaded file must include: name, bio, niche, location, audience_size")
+            st.error("Dataset must include: name, bio, niche, location, audience_size")
             st.stop()
 
-        # Create matcher object
+        # Instantiate matcher
         matcher = CreatorMatcher(creators_df)
 
-        # Sidebar filters for niche and location
+        # Sidebar filters
         st.sidebar.header("🔧 Filters")
         selected_niche = st.sidebar.selectbox("Filter by Niche", ["All"] + sorted(creators_df["niche"].unique().tolist()))
         selected_location = st.sidebar.selectbox("Filter by Location", ["All"] + sorted(creators_df["location"].unique().tolist()))
 
-        # Campaign brief input area
+        # Campaign brief input
         campaign_brief = st.text_area("📢 Enter your campaign brief", height=150, placeholder="e.g. Looking for creators who talk about sustainable fashion trends...")
 
-        # Button to trigger matching logic
+        # Match creators on button click
         if st.button("Find Matching Creators 🚀") and campaign_brief.strip():
             with st.spinner("Finding best matches..."):
-                # Apply selected filters (if not 'All')
                 filters = {
                     "niche": None if selected_niche == "All" else selected_niche,
                     "location": None if selected_location == "All" else selected_location
                 }
 
-                # Get top 10 matching creators
                 top_creators = matcher.match(campaign_brief, top_n=10, filters=filters)
 
                 st.subheader("🎯 Top Matching Creators")
 
-                # Display results in styled HTML blocks
                 for idx, row in top_creators.iterrows():
                     st.markdown(
                         f"""
@@ -116,7 +120,7 @@ if uploaded_file:
                         unsafe_allow_html=True
                     )
 
-                # Option to download results as CSV
+                # Download as CSV
                 st.download_button(
                     label="📥 Download Results as CSV",
                     data=top_creators.to_csv(index=False),
