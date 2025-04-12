@@ -1,6 +1,5 @@
 streamlit
 pandas
-sentence-transformers
+sentence_transformers
 torch
-openpyxl
-rich
+hashlib
