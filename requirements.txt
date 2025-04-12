@@ -2,4 +2,3 @@ streamlit
 pandas
 sentence_transformers
 torch
-hashlib
