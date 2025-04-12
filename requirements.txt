@@ -1,6 +1,6 @@
 streamlit
 pandas
 torch
-sentence_transformers import SentenceTransformer, util
+sentence-transformers
 io
 numpy
