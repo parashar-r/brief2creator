@@ -1,6 +1,6 @@
 streamlit
 pandas
-torch
 sentence-transformers
-io
-numpy
+torch
+openpyxl
+rich
